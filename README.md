@@ -4,7 +4,7 @@ Redistributable FFmpeg image used by [Dispatcharr](https://github.com/Dispatchar
 
 | Knob | Value |
 |------|--------|
-| FFmpeg | 9.0.1 (pinned in `versions.env`) |
+| FFmpeg | 9.0.2 (pinned in `versions.env`) |
 | License flags | `--enable-gpl --enable-version3` |
 | TLS | GnuTLS (not OpenSSL) |
 | AAC | native `aac` + `libfdk_aac` from **fdk-aac-stripped** |
