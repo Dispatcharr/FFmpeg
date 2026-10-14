@@ -1,0 +1,80 @@
+name: FFmpeg version bump PR
+
+# Opens a PR when a newer release exists for FFMPEG_SERIES (e.g. 9.0.x and 9.1.x).
+# Merge the PR to approve the bump, then run the image build workflow manually.
+
+on:
+  schedule:
+    # Daily 15:00 UTC
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve latest series release
+        id: latest
+        run: |
+          set -euo pipefail
+          chmod +x scripts/resolve-ffmpeg-version.sh
+          # shellcheck disable=SC1091
+          . ./versions.env
+          NEW_VERSION="$(./scripts/resolve-ffmpeg-version.sh --version)"
+          NEW_URL="$(./scripts/resolve-ffmpeg-version.sh --url)"
+          echo "current=${FFMPEG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "url=${NEW_URL}" >> "$GITHUB_OUTPUT"
+          echo "series=${FFMPEG_SERIES}" >> "$GITHUB_OUTPUT"
+          if [[ "${NEW_VERSION}" == "${FFMPEG_VERSION}" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Current pin: ${FFMPEG_VERSION}"
+          echo "Latest ${FFMPEG_SERIES}.x release: ${NEW_VERSION}"
+
+      - name: Update versions.env
+        if: steps.latest.outputs.changed == 'true'
+        env:
+          NEW_VERSION: ${{ steps.latest.outputs.version }}
+          NEW_URL: ${{ steps.latest.outputs.url }}
+        run: |
+          set -euo pipefail
+          sed -i \
+            -e "s|^FFMPEG_VERSION=.*|FFMPEG_VERSION=${NEW_VERSION}|" \
+            -e "s|^FFMPEG_URL=.*|FFMPEG_URL=${NEW_URL}|" \
+            versions.env
+          # Keep README table in sync when present
+          if grep -q '| FFmpeg |' README.md; then
+            sed -i -E "s/^\| FFmpeg \| .*\|$/| FFmpeg | ${NEW_VERSION} (pinned in \`versions.env\`) |/" README.md
+          fi
+          echo "Updated versions.env:"
+          grep -E '^FFMPEG_(SERIES|VERSION|URL)=' versions.env
+
+      - name: Create or update pull request
+        if: steps.latest.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: chore/ffmpeg-${{ steps.latest.outputs.version }}
+          delete-branch: true
+          commit-message: |
+            chore: bump FFmpeg to ${{ steps.latest.outputs.version }}
+
+            Latest ${{ steps.latest.outputs.series }}.x point release from ffmpeg.org.
+          title: "chore: bump FFmpeg to ${{ steps.latest.outputs.version }}"
+          body: |
+            ## Summary
+            - Bump `FFMPEG_VERSION` from `${{ steps.latest.outputs.current }}` to `${{ steps.latest.outputs.version }}` (series `${{ steps.latest.outputs.series }}`).
+            - Source: `${{ steps.latest.outputs.url }}`
+
+            ## Test plan
+            - [ ] Merge this PR, then run `build.yml` manually (image builds are not triggered by PRs)
+            - [ ] `ffmpeg -version` in the published image reports `${{ steps.latest.outputs.version }}`
+            - [ ] Smoke script still asserts no `nonfree` / `openssl`
