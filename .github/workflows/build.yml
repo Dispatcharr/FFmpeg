@@ -1,0 +1,216 @@
+name: FFmpeg Image Build
+
+# Manual only. Pushes and pull requests do not build or publish.
+# Run this after merging a change you want in ghcr.io/dispatcharr/ffmpeg.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-26.04
+    outputs:
+      repo_owner: ${{ steps.meta.outputs.repo_owner }}
+      ffmpeg_version: ${{ steps.versions.outputs.ffmpeg_version }}
+      tag_suffix: ${{ steps.versions.outputs.tag_suffix }}
+      ubuntu_base: ${{ steps.versions.outputs.ubuntu_base }}
+      created: ${{ steps.meta.outputs.created }}
+      image_title: ${{ steps.meta.outputs.image_title }}
+      image_description: ${{ steps.meta.outputs.image_description }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read versions.env
+        id: versions
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          . ./versions.env
+          echo "ffmpeg_version=${FFMPEG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag_suffix=${IMAGE_TAG_SUFFIX}" >> "$GITHUB_OUTPUT"
+          echo "ubuntu_base=${UBUNTU_BASE}" >> "$GITHUB_OUTPUT"
+
+      - name: Set image metadata
+        id: meta
+        run: |
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "repo_owner=${REPO_OWNER}" >> "$GITHUB_OUTPUT"
+          echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "image_title=ffmpeg" >> "$GITHUB_OUTPUT"
+          echo "image_description=Redistributable FFmpeg image for Dispatcharr. GPL v3, GnuTLS, NVENC API 13.0, no nonfree." >> "$GITHUB_OUTPUT"
+
+  docker:
+    needs: [prepare]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [amd64, arm64]
+        include:
+          - platform: amd64
+            runner: ubuntu-26.04
+          - platform: arm64
+            runner: ubuntu-26.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push platform image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          build-args: |
+            UBUNTU_BASE=${{ needs.prepare.outputs.ubuntu_base }}
+            SOURCE_REVISION=${{ github.sha }}
+          push: true
+          tags: |
+            ghcr.io/${{ needs.prepare.outputs.repo_owner }}/ffmpeg:${{ needs.prepare.outputs.ffmpeg_version }}-${{ needs.prepare.outputs.tag_suffix }}-${{ matrix.platform }}
+            ghcr.io/${{ needs.prepare.outputs.repo_owner }}/ffmpeg:${{ needs.prepare.outputs.ffmpeg_version }}-${{ matrix.platform }}
+          cache-from: type=gha,scope=ffmpeg-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=ffmpeg-${{ matrix.platform }}
+          provenance: false
+          labels: |
+            org.opencontainers.image.title=${{ needs.prepare.outputs.image_title }}
+            org.opencontainers.image.description=${{ needs.prepare.outputs.image_description }}
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.ffmpeg_version }}-${{ needs.prepare.outputs.tag_suffix }}
+            org.opencontainers.image.created=${{ needs.prepare.outputs.created }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}
+            org.opencontainers.image.vendor=${{ needs.prepare.outputs.repo_owner }}
+            org.opencontainers.image.authors=${{ github.actor }}
+            maintainer=${{ github.actor }}
+            build_version=FFmpeg ${{ needs.prepare.outputs.ffmpeg_version }}-${{ needs.prepare.outputs.tag_suffix }}
+          annotations: |
+            manifest:org.opencontainers.image.title=${{ needs.prepare.outputs.image_title }}
+            manifest:org.opencontainers.image.description=${{ needs.prepare.outputs.image_description }}
+            manifest:org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            manifest:org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            manifest:org.opencontainers.image.version=${{ needs.prepare.outputs.ffmpeg_version }}-${{ needs.prepare.outputs.tag_suffix }}
+            manifest:org.opencontainers.image.created=${{ needs.prepare.outputs.created }}
+            manifest:org.opencontainers.image.revision=${{ github.sha }}
+            manifest:org.opencontainers.image.licenses=GPL-3.0-or-later
+            manifest:org.opencontainers.image.documentation=https://github.com/${{ github.repository }}
+            manifest:org.opencontainers.image.vendor=${{ needs.prepare.outputs.repo_owner }}
+            manifest:org.opencontainers.image.authors=${{ github.actor }}
+            manifest:maintainer=${{ github.actor }}
+            manifest:build_version=FFmpeg ${{ needs.prepare.outputs.ffmpeg_version }}-${{ needs.prepare.outputs.tag_suffix }}
+
+  manifest:
+    needs: [prepare, docker]
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifests
+        env:
+          OWNER: ${{ needs.prepare.outputs.repo_owner }}
+          VER: ${{ needs.prepare.outputs.ffmpeg_version }}
+          SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
+          TITLE: ${{ needs.prepare.outputs.image_title }}
+          DESCRIPTION: ${{ needs.prepare.outputs.image_description }}
+          CREATED: ${{ needs.prepare.outputs.created }}
+          REVISION: ${{ github.sha }}
+          SOURCE: https://github.com/${{ github.repository }}
+          VENDOR: ${{ needs.prepare.outputs.repo_owner }}
+          AUTHORS: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          # GitHub reads org.opencontainers.image.description from the index.
+          # Image labels are not shown for a multi-arch manifest.
+          anns=(
+            --annotation "index:org.opencontainers.image.title=${TITLE}"
+            --annotation "index:org.opencontainers.image.description=${DESCRIPTION}"
+            --annotation "index:org.opencontainers.image.url=${SOURCE}"
+            --annotation "index:org.opencontainers.image.source=${SOURCE}"
+            --annotation "index:org.opencontainers.image.version=${VER}-${SUFFIX}"
+            --annotation "index:org.opencontainers.image.created=${CREATED}"
+            --annotation "index:org.opencontainers.image.revision=${REVISION}"
+            --annotation "index:org.opencontainers.image.licenses=GPL-3.0-or-later"
+            --annotation "index:org.opencontainers.image.documentation=${SOURCE}"
+            --annotation "index:org.opencontainers.image.vendor=${VENDOR}"
+            --annotation "index:org.opencontainers.image.authors=${AUTHORS}"
+            --annotation "index:maintainer=${AUTHORS}"
+            --annotation "index:build_version=FFmpeg ${VER}-${SUFFIX}"
+          )
+          # One create for every tag. Each call reads both architecture manifests.
+          # The commit tag matches the git release and stays on this build.
+          short_sha="${REVISION:0:12}"
+          tags=(
+            -t "ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}-${short_sha}"
+            -t "ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}"
+            -t "ghcr.io/${OWNER}/ffmpeg:${VER}"
+          )
+          if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            tags+=(-t "ghcr.io/${OWNER}/ffmpeg:latest")
+          fi
+          docker buildx imagetools create "${anns[@]}" "${tags[@]}" \
+            "ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}-amd64" \
+            "ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}-arm64"
+
+  release:
+    needs: [prepare, manifest]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - name: Tag the source and publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ needs.prepare.outputs.repo_owner }}
+          VER: ${{ needs.prepare.outputs.ffmpeg_version }}
+          SUFFIX: ${{ needs.prepare.outputs.tag_suffix }}
+        run: |
+          set -euo pipefail
+          # Image tags stay on the version. The git tag names this commit, so a
+          # rebuild of the same FFmpeg version from a new commit gets its own release.
+          SHORT_SHA="${GITHUB_SHA:0:12}"
+          TAG="v${VER}-${SUFFIX}-${SHORT_SHA}"
+          REMOTE_SHA=""
+          if REMOTE_SHA=$(gh api --jq .object.sha "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" 2>/dev/null); then
+            if [[ "$REMOTE_SHA" != "$GITHUB_SHA" ]]; then
+              echo "Tag ${TAG} points at ${REMOTE_SHA}, not ${GITHUB_SHA}" >&2
+              exit 1
+            fi
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists for ${GITHUB_SHA}"
+            exit 0
+          fi
+          notes=$(printf '%s\n' \
+            "## Image" \
+            "" \
+            "- \`ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}-${SHORT_SHA}\` (this release; does not move)" \
+            "- \`ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}\`" \
+            "- \`ghcr.io/${OWNER}/ffmpeg:${VER}\`")
+          if [[ "$GITHUB_REF" == "refs/heads/main" || "$GITHUB_REF" == "refs/heads/dev" ]]; then
+            notes+=$'\n'"- \`ghcr.io/${OWNER}/ffmpeg:latest\`"
+          fi
+          notes+=$'\n\n'"Source for this build is git tag \`${TAG}\` (${GITHUB_SHA}). The image tag without the leading \`v\` is this build. The other image tags move when a later build of the same FFmpeg version is published. Upstream archive pins are in \`versions.env\`, copied into the image at \`/usr/local/share/doc/dispatcharr-ffmpeg/versions.env\`."
+          # Create the tag and release on GitHub. gh release create runs git locally,
+          # and this job does not check out the repository.
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="$TAG" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f name="FFmpeg ${VER}-${SUFFIX} (${SHORT_SHA})" \
+            -f body="$notes"
