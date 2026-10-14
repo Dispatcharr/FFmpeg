@@ -8,7 +8,7 @@ Redistributable FFmpeg image used by [Dispatcharr](https://github.com/Dispatchar
 | License flags | `--enable-gpl --enable-version3` |
 | TLS | GnuTLS (not OpenSSL) |
 | AAC | native `aac` + `libfdk_aac` from **fdk-aac-stripped** |
-| NVENC | `nv-codec-headers` **n13.0.19.0** (API 13.0; Pascal / driver 580 OK) |
+| NVENC | `nv-codec-headers` **n13.0.19.1** (API 13.0; Pascal / driver 580 OK) |
 | Quick Sync | `--enable-libvpl` on amd64 (oneVPL). The arm64 image has no `qsv`: Ubuntu 26 publishes `libvpl` and the Intel media driver for amd64 only, and arm64 has no Quick Sync engine. VAAPI stays on both architectures. The old `--enable-libmfx` flag is not used. |
 | GPU userspace | amd64: Intel iHD + i965, plus AMD radeonsi/r600. arm64: AMD radeonsi/r600 only. NVIDIA's driver stays on the host. |
 | Nonfree | **not enabled** |
@@ -41,7 +41,7 @@ Workflows:
 
 Tags (after a build). All three names point at that build:
 
-- `<version>-nvenc130` (e.g. `9.0.1-nvenc130`). This is the pin to use. The suffix is the NVENC API compiled into the binary (`nv-codec-headers` n13.0.19.0). API 13.0 still runs on Pascal and driver 580. A later 13.1 build of the same FFmpeg version is published as `<version>-nvenc131`, and the `nvenc130` tag stays on the 13.0 image.
+- `<version>-nvenc130` (e.g. `9.0.1-nvenc130`). This is the pin to use. The suffix is the NVENC API compiled into the binary (`nv-codec-headers` n13.0.19.1). API 13.0 still runs on Pascal and driver 580. A later 13.1 build of the same FFmpeg version is published as `<version>-nvenc131`, and the `nvenc130` tag stays on the 13.0 image.
 - `<version>` (e.g. `9.0.1`). Same image, without the API in the name. This tag moves if that FFmpeg version is rebuilt with a different NVENC pin.
 - `latest`, when the build workflow is run from `main` or `dev`. A build from another branch publishes the version tags and leaves `latest` where it is.
 
