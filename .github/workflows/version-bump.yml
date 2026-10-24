@@ -1,15 +1,21 @@
 name: Version bump PRs
 
-# Daily, on push to main, and manual. Two independent pins, each with its own PR.
-# Both update versions.env and the matching README pin text. After one merges, the
-# push to main re-runs this workflow and create-pull-request rebuilds the other
-# branch from current main (no separate rebase workflow).
+# Daily, on push to main, and manual. One independent pin per job / PR branch.
+# Each job updates versions.env (and README when that pin is named there). After
+# one merges, the push to main re-runs this workflow and create-pull-request
+# rebuilds any still-needed bump branches from current main.
 # Merge the pull request to approve the bump, then run the image build workflow manually.
 #
-# ffmpeg: newer release within FFMPEG_SERIES (for example 9.0.x and 9.1.x),
-# branch chore/ffmpeg-bump.
-# nv-codec-headers: newest tag on NV_CODEC_HEADERS_SERIES (for example 13.0, not 13.1),
-# branch chore/nv-codec-headers-bump.
+# Pins (series / ref gates in versions.env):
+#   ffmpeg              FFMPEG_SERIES (e.g. 9)
+#   nv-codec-headers    NV_CODEC_HEADERS_SERIES (e.g. 13.0, not 13.1)
+#   fdk-aac-stripped    FDK_AAC_STRIPPED_REF tip (stripped5)
+#   x264                X264_REF tip (master)
+#   x265                X265_SERIES (e.g. 4)
+#   lame                newest Ubuntu pool orig tarball
+#   opus                OPUS_SERIES (e.g. 1)
+#   dav1d               DAV1D_SERIES (e.g. 1)
+#   libvpx              LIBVPX_SERIES (e.g. 1)
 
 on:
   schedule:
@@ -157,7 +163,6 @@ jobs:
         if: steps.latest.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
-          # Default author is whoever triggered the run. These commits are automated.
           author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
           branch: chore/nv-codec-headers-bump
           delete-branch: true
@@ -175,3 +180,438 @@ jobs:
             ## Test plan
             - [ ] Merge this PR, then run `build.yml` manually (image builds are not triggered by PRs)
             - [ ] Smoke script still expects NVENC API `${{ steps.latest.outputs.series }}`
+
+  fdk-aac-stripped:
+    name: Bump fdk-aac-stripped
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve tip of stripping branch
+        id: latest
+        run: |
+          set -euo pipefail
+          chmod +x scripts/resolve-fdk-aac-stripped.sh
+          # shellcheck disable=SC1091
+          . ./versions.env
+          NEW_COMMIT="$(./scripts/resolve-fdk-aac-stripped.sh --commit)"
+          NEW_URL="$(./scripts/resolve-fdk-aac-stripped.sh --url)"
+          echo "current=${FDK_AAC_STRIPPED_COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "commit=${NEW_COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "url=${NEW_URL}" >> "$GITHUB_OUTPUT"
+          echo "ref=${FDK_AAC_STRIPPED_REF}" >> "$GITHUB_OUTPUT"
+          if [[ "${NEW_COMMIT}" == "${FDK_AAC_STRIPPED_COMMIT}" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Current pin: ${FDK_AAC_STRIPPED_COMMIT}"
+          echo "Latest ${FDK_AAC_STRIPPED_REF}: ${NEW_COMMIT}"
+
+      - name: Update versions.env
+        if: steps.latest.outputs.changed == 'true'
+        env:
+          NEW_COMMIT: ${{ steps.latest.outputs.commit }}
+          NEW_URL: ${{ steps.latest.outputs.url }}
+        run: |
+          set -euo pipefail
+          sed -i \
+            -e "s|^FDK_AAC_STRIPPED_COMMIT=.*|FDK_AAC_STRIPPED_COMMIT=${NEW_COMMIT}|" \
+            -e "s|^FDK_AAC_STRIPPED_URL=.*|FDK_AAC_STRIPPED_URL=${NEW_URL}|" \
+            versions.env
+          echo "Updated versions.env:"
+          grep -E '^FDK_AAC_STRIPPED_' versions.env
+
+      - name: Create or update pull request
+        if: steps.latest.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          branch: chore/fdk-aac-stripped-bump
+          delete-branch: true
+          commit-message: |
+            chore: bump fdk-aac-stripped to ${{ steps.latest.outputs.commit }}
+
+            Tip of ${{ steps.latest.outputs.ref }}.
+          title: "chore: bump fdk-aac-stripped to ${{ steps.latest.outputs.commit }}"
+          body: |
+            ## Summary
+            - Bump `FDK_AAC_STRIPPED_COMMIT` from `${{ steps.latest.outputs.current }}` to `${{ steps.latest.outputs.commit }}` (ref `${{ steps.latest.outputs.ref }}`).
+            - Source: `${{ steps.latest.outputs.url }}`
+
+            ## Test plan
+            - [ ] Merge this PR, then run `build.yml` manually
+            - [ ] Smoke script still asserts `libfdk_aac` and no `nonfree`
+
+  x264:
+    name: Bump x264
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve tip of x264 ref
+        id: latest
+        run: |
+          set -euo pipefail
+          chmod +x scripts/resolve-x264.sh
+          # shellcheck disable=SC1091
+          . ./versions.env
+          NEW_COMMIT="$(./scripts/resolve-x264.sh --commit)"
+          NEW_URL="$(./scripts/resolve-x264.sh --url)"
+          echo "current=${X264_COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "commit=${NEW_COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "url=${NEW_URL}" >> "$GITHUB_OUTPUT"
+          echo "ref=${X264_REF}" >> "$GITHUB_OUTPUT"
+          if [[ "${NEW_COMMIT}" == "${X264_COMMIT}" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Current pin: ${X264_COMMIT}"
+          echo "Latest ${X264_REF}: ${NEW_COMMIT}"
+
+      - name: Update versions.env
+        if: steps.latest.outputs.changed == 'true'
+        env:
+          NEW_COMMIT: ${{ steps.latest.outputs.commit }}
+          NEW_URL: ${{ steps.latest.outputs.url }}
+        run: |
+          set -euo pipefail
+          sed -i \
+            -e "s|^X264_COMMIT=.*|X264_COMMIT=${NEW_COMMIT}|" \
+            -e "s|^X264_URL=.*|X264_URL=${NEW_URL}|" \
+            versions.env
+          echo "Updated versions.env:"
+          grep -E '^X264_' versions.env
+
+      - name: Create or update pull request
+        if: steps.latest.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          branch: chore/x264-bump
+          delete-branch: true
+          commit-message: |
+            chore: bump x264 to ${{ steps.latest.outputs.commit }}
+
+            Tip of ${{ steps.latest.outputs.ref }}.
+          title: "chore: bump x264 to ${{ steps.latest.outputs.commit }}"
+          body: |
+            ## Summary
+            - Bump `X264_COMMIT` from `${{ steps.latest.outputs.current }}` to `${{ steps.latest.outputs.commit }}` (ref `${{ steps.latest.outputs.ref }}`).
+            - Source: `${{ steps.latest.outputs.url }}`
+
+            ## Test plan
+            - [ ] Merge this PR, then run `build.yml` manually
+            - [ ] Smoke script still asserts static `libx264`
+
+  x265:
+    name: Bump x265
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve latest series release
+        id: latest
+        run: |
+          set -euo pipefail
+          chmod +x scripts/resolve-x265.sh
+          # shellcheck disable=SC1091
+          . ./versions.env
+          NEW_VERSION="$(./scripts/resolve-x265.sh --version)"
+          NEW_URL="$(./scripts/resolve-x265.sh --url)"
+          echo "current=${X265_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "url=${NEW_URL}" >> "$GITHUB_OUTPUT"
+          echo "series=${X265_SERIES}" >> "$GITHUB_OUTPUT"
+          if [[ "${NEW_VERSION}" == "${X265_VERSION}" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Current pin: ${X265_VERSION}"
+          echo "Latest ${X265_SERIES}.x release: ${NEW_VERSION}"
+
+      - name: Update versions.env
+        if: steps.latest.outputs.changed == 'true'
+        env:
+          NEW_VERSION: ${{ steps.latest.outputs.version }}
+          NEW_URL: ${{ steps.latest.outputs.url }}
+        run: |
+          set -euo pipefail
+          sed -i \
+            -e "s|^X265_VERSION=.*|X265_VERSION=${NEW_VERSION}|" \
+            -e "s|^X265_URL=.*|X265_URL=${NEW_URL}|" \
+            versions.env
+          echo "Updated versions.env:"
+          grep -E '^X265_' versions.env
+
+      - name: Create or update pull request
+        if: steps.latest.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          branch: chore/x265-bump
+          delete-branch: true
+          commit-message: |
+            chore: bump x265 to ${{ steps.latest.outputs.version }}
+
+            Latest ${{ steps.latest.outputs.series }}.x release.
+          title: "chore: bump x265 to ${{ steps.latest.outputs.version }}"
+          body: |
+            ## Summary
+            - Bump `X265_VERSION` from `${{ steps.latest.outputs.current }}` to `${{ steps.latest.outputs.version }}` (series `${{ steps.latest.outputs.series }}`).
+            - Source: `${{ steps.latest.outputs.url }}`
+            - `X265_SERIES` is not changed. A different major is a separate pin change.
+
+            ## Test plan
+            - [ ] Merge this PR, then run `build.yml` manually
+            - [ ] Smoke script still asserts static `libx265`
+
+  lame:
+    name: Bump LAME
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve newest Ubuntu pool orig tarball
+        id: latest
+        run: |
+          set -euo pipefail
+          chmod +x scripts/resolve-lame.sh
+          # shellcheck disable=SC1091
+          . ./versions.env
+          NEW_VERSION="$(./scripts/resolve-lame.sh --version)"
+          NEW_URL="$(./scripts/resolve-lame.sh --url)"
+          echo "current=${LAME_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "url=${NEW_URL}" >> "$GITHUB_OUTPUT"
+          if [[ "${NEW_VERSION}" == "${LAME_VERSION}" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Current pin: ${LAME_VERSION}"
+          echo "Latest Ubuntu pool orig: ${NEW_VERSION}"
+
+      - name: Update versions.env
+        if: steps.latest.outputs.changed == 'true'
+        env:
+          NEW_VERSION: ${{ steps.latest.outputs.version }}
+          NEW_URL: ${{ steps.latest.outputs.url }}
+        run: |
+          set -euo pipefail
+          sed -i \
+            -e "s|^LAME_VERSION=.*|LAME_VERSION=${NEW_VERSION}|" \
+            -e "s|^LAME_URL=.*|LAME_URL=${NEW_URL}|" \
+            versions.env
+          echo "Updated versions.env:"
+          grep -E '^LAME_' versions.env
+
+      - name: Create or update pull request
+        if: steps.latest.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          branch: chore/lame-bump
+          delete-branch: true
+          commit-message: |
+            chore: bump LAME to ${{ steps.latest.outputs.version }}
+
+            Newest Ubuntu pool orig tarball.
+          title: "chore: bump LAME to ${{ steps.latest.outputs.version }}"
+          body: |
+            ## Summary
+            - Bump `LAME_VERSION` from `${{ steps.latest.outputs.current }}` to `${{ steps.latest.outputs.version }}`.
+            - Source: `${{ steps.latest.outputs.url }}`
+            - Tracked from the Ubuntu pool (not sourceforge). Stock 3.100 fails on GCC 15.
+
+            ## Test plan
+            - [ ] Merge this PR, then run `build.yml` manually
+            - [ ] Smoke script still asserts static `libmp3lame`
+
+  opus:
+    name: Bump Opus
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve latest series release
+        id: latest
+        run: |
+          set -euo pipefail
+          chmod +x scripts/resolve-opus.sh
+          # shellcheck disable=SC1091
+          . ./versions.env
+          NEW_VERSION="$(./scripts/resolve-opus.sh --version)"
+          NEW_URL="$(./scripts/resolve-opus.sh --url)"
+          echo "current=${OPUS_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "url=${NEW_URL}" >> "$GITHUB_OUTPUT"
+          echo "series=${OPUS_SERIES}" >> "$GITHUB_OUTPUT"
+          if [[ "${NEW_VERSION}" == "${OPUS_VERSION}" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Current pin: ${OPUS_VERSION}"
+          echo "Latest ${OPUS_SERIES}.x release: ${NEW_VERSION}"
+
+      - name: Update versions.env
+        if: steps.latest.outputs.changed == 'true'
+        env:
+          NEW_VERSION: ${{ steps.latest.outputs.version }}
+          NEW_URL: ${{ steps.latest.outputs.url }}
+        run: |
+          set -euo pipefail
+          sed -i \
+            -e "s|^OPUS_VERSION=.*|OPUS_VERSION=${NEW_VERSION}|" \
+            -e "s|^OPUS_URL=.*|OPUS_URL=${NEW_URL}|" \
+            versions.env
+          echo "Updated versions.env:"
+          grep -E '^OPUS_' versions.env
+
+      - name: Create or update pull request
+        if: steps.latest.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          branch: chore/opus-bump
+          delete-branch: true
+          commit-message: |
+            chore: bump Opus to ${{ steps.latest.outputs.version }}
+
+            Latest ${{ steps.latest.outputs.series }}.x release.
+          title: "chore: bump Opus to ${{ steps.latest.outputs.version }}"
+          body: |
+            ## Summary
+            - Bump `OPUS_VERSION` from `${{ steps.latest.outputs.current }}` to `${{ steps.latest.outputs.version }}` (series `${{ steps.latest.outputs.series }}`).
+            - Source: `${{ steps.latest.outputs.url }}`
+
+            ## Test plan
+            - [ ] Merge this PR, then run `build.yml` manually
+            - [ ] Smoke script still asserts static `libopus`
+
+  dav1d:
+    name: Bump dav1d
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve latest series release
+        id: latest
+        run: |
+          set -euo pipefail
+          chmod +x scripts/resolve-dav1d.sh
+          # shellcheck disable=SC1091
+          . ./versions.env
+          NEW_VERSION="$(./scripts/resolve-dav1d.sh --version)"
+          NEW_URL="$(./scripts/resolve-dav1d.sh --url)"
+          echo "current=${DAV1D_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "url=${NEW_URL}" >> "$GITHUB_OUTPUT"
+          echo "series=${DAV1D_SERIES}" >> "$GITHUB_OUTPUT"
+          if [[ "${NEW_VERSION}" == "${DAV1D_VERSION}" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Current pin: ${DAV1D_VERSION}"
+          echo "Latest ${DAV1D_SERIES}.x release: ${NEW_VERSION}"
+
+      - name: Update versions.env
+        if: steps.latest.outputs.changed == 'true'
+        env:
+          NEW_VERSION: ${{ steps.latest.outputs.version }}
+          NEW_URL: ${{ steps.latest.outputs.url }}
+        run: |
+          set -euo pipefail
+          sed -i \
+            -e "s|^DAV1D_VERSION=.*|DAV1D_VERSION=${NEW_VERSION}|" \
+            -e "s|^DAV1D_URL=.*|DAV1D_URL=${NEW_URL}|" \
+            versions.env
+          echo "Updated versions.env:"
+          grep -E '^DAV1D_' versions.env
+
+      - name: Create or update pull request
+        if: steps.latest.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          branch: chore/dav1d-bump
+          delete-branch: true
+          commit-message: |
+            chore: bump dav1d to ${{ steps.latest.outputs.version }}
+
+            Latest ${{ steps.latest.outputs.series }}.x release.
+          title: "chore: bump dav1d to ${{ steps.latest.outputs.version }}"
+          body: |
+            ## Summary
+            - Bump `DAV1D_VERSION` from `${{ steps.latest.outputs.current }}` to `${{ steps.latest.outputs.version }}` (series `${{ steps.latest.outputs.series }}`).
+            - Source: `${{ steps.latest.outputs.url }}`
+
+            ## Test plan
+            - [ ] Merge this PR, then run `build.yml` manually
+            - [ ] Smoke script still asserts static `libdav1d`
+
+  libvpx:
+    name: Bump libvpx
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve latest series release
+        id: latest
+        run: |
+          set -euo pipefail
+          chmod +x scripts/resolve-libvpx.sh
+          # shellcheck disable=SC1091
+          . ./versions.env
+          NEW_VERSION="$(./scripts/resolve-libvpx.sh --version)"
+          NEW_URL="$(./scripts/resolve-libvpx.sh --url)"
+          echo "current=${LIBVPX_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "url=${NEW_URL}" >> "$GITHUB_OUTPUT"
+          echo "series=${LIBVPX_SERIES}" >> "$GITHUB_OUTPUT"
+          if [[ "${NEW_VERSION}" == "${LIBVPX_VERSION}" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Current pin: ${LIBVPX_VERSION}"
+          echo "Latest ${LIBVPX_SERIES}.x release: ${NEW_VERSION}"
+
+      - name: Update versions.env
+        if: steps.latest.outputs.changed == 'true'
+        env:
+          NEW_VERSION: ${{ steps.latest.outputs.version }}
+          NEW_URL: ${{ steps.latest.outputs.url }}
+        run: |
+          set -euo pipefail
+          sed -i \
+            -e "s|^LIBVPX_VERSION=.*|LIBVPX_VERSION=${NEW_VERSION}|" \
+            -e "s|^LIBVPX_URL=.*|LIBVPX_URL=${NEW_URL}|" \
+            versions.env
+          echo "Updated versions.env:"
+          grep -E '^LIBVPX_' versions.env
+
+      - name: Create or update pull request
+        if: steps.latest.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          branch: chore/libvpx-bump
+          delete-branch: true
+          commit-message: |
+            chore: bump libvpx to ${{ steps.latest.outputs.version }}
+
+            Latest ${{ steps.latest.outputs.series }}.x release.
+          title: "chore: bump libvpx to ${{ steps.latest.outputs.version }}"
+          body: |
+            ## Summary
+            - Bump `LIBVPX_VERSION` from `${{ steps.latest.outputs.current }}` to `${{ steps.latest.outputs.version }}` (series `${{ steps.latest.outputs.series }}`).
+            - Source: `${{ steps.latest.outputs.url }}`
+
+            ## Test plan
+            - [ ] Merge this PR, then run `build.yml` manually
+            - [ ] Smoke script still asserts static `libvpx`

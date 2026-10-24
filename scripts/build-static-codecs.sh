@@ -23,7 +23,8 @@ rm -rf /tmp/x264
 
 echo "=== x265 ${X265_VERSION} ==="
 fetch "$X265_URL" /tmp/x265
-# x265 3.6 asks for CMake 2.8 and sets two policies to OLD. CMake 4 rejects both.
+# Older trees (3.6) set CMP0025/CMP0054 to OLD; CMake 4 rejects that. 4.x is
+# cleaner but still declares a low cmake_minimum_required, so keep the floor.
 sed -i \
   -e '/cmake_policy(SET CMP0025 OLD)/d' \
   -e '/cmake_policy(SET CMP0054 OLD)/d' \

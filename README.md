@@ -37,7 +37,7 @@ docker run --rm ghcr.io/dispatcharr/ffmpeg:local ffmpeg -hide_banner -version
 Workflows:
 
 - `.github/workflows/build.yml` — manual only. Builds the amd64 + arm64 image and publishes it to GHCR. Pushes and pull requests do not run it.
-- `.github/workflows/version-bump.yml`: daily, on push to `main`, and manual. Checks for a newer **FFmpeg 9 release** (`9.0.x` and `9.1.x`) and for a newer **nv-codec-headers** tag on the pinned NVENC API line (`13.0`, not `13.1`). Each pin has its own pull request (`chore/ffmpeg-bump` and `chore/nv-codec-headers-bump`). Merging one recreates the other from current `main` if that bump is still needed. Merging does not build the image.
+- `.github/workflows/version-bump.yml`: daily, on push to `main`, and manual. Opens one PR per pin when a newer release (or branch tip) appears on the series / ref in `versions.env`: FFmpeg (`FFMPEG_SERIES`), nv-codec-headers (`NV_CODEC_HEADERS_SERIES`), fdk-aac-stripped (`FDK_AAC_STRIPPED_REF`), x264 (`X264_REF`), x265 (`X265_SERIES`), LAME (Ubuntu pool), Opus, dav1d, and libvpx. Branches are `chore/<pin>-bump`. Merging one recreates any still-needed bump branches from current `main`. Merging does not build the image.
 
 Tags (after a build). These names point at that build:
 
@@ -48,7 +48,7 @@ Tags (after a build). These names point at that build:
 
 The build also creates git tag `v<version>-nvenc130-<commit>` (for example `v9.0.1-nvenc130-2b081ea69803`) and a GitHub Release. The commit is the first 12 characters of the git commit that built the image. That tag is the source for that build. GitHub attaches an archive of this repository. Upstream tarballs stay at the URLs in `versions.env`.
 
-To publish an image, or to check for a new FFmpeg point release:
+To publish an image, or to check for dependency bumps:
 
 ```bash
 gh workflow run build.yml
