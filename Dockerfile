@@ -191,14 +191,19 @@ RUN set -eu; \
     test -f /usr/local/share/doc/dispatcharr-ffmpeg/VERSIONS; \
     test -f /usr/local/share/doc/dispatcharr-ffmpeg/versions.env; \
     test -f /usr/local/share/doc/dispatcharr-ffmpeg/SOURCE_REVISION; \
+    printf 'LANG=C.UTF-8\nLC_ALL=C.UTF-8\n' > /etc/default/locale; \
     ffmpeg -hide_banner -version
 
 # Keep PATH obvious for derived images (DispatcharrBase).
+# C.UTF-8: language-neutral UTF-8 for all consumers of this Ubuntu rootfs
+# (avoids plain C / SQL_ASCII defaults in Postgres and other tools).
 # The NVIDIA container runtime reads NVIDIA_DRIVER_CAPABILITIES when the
 # container starts. "video" is what bind-mounts libnvidia-encode.so.1 and
 # libnvcuvid.so.1 from the host. Without it the default is compute,utility,
 # which is enough for nvidia-smi and not enough for NVENC.
 ENV PATH="/usr/local/bin:${PATH}" \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
     NVIDIA_DRIVER_CAPABILITIES="compute,video,utility" \
     NVIDIA_VISIBLE_DEVICES="all"
 
