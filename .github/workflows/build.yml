@@ -20,6 +20,7 @@ jobs:
       created: ${{ steps.meta.outputs.created }}
       image_title: ${{ steps.meta.outputs.image_title }}
       image_description: ${{ steps.meta.outputs.image_description }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v6
 
@@ -41,6 +42,7 @@ jobs:
           echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           echo "image_title=ffmpeg" >> "$GITHUB_OUTPUT"
           echo "image_description=Redistributable FFmpeg image for Dispatcharr. GPL v3, GnuTLS, NVENC API 13.0, no nonfree." >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
 
   docker:
     needs: [prepare]
@@ -77,6 +79,7 @@ jobs:
             SOURCE_REVISION=${{ github.sha }}
           push: true
           tags: |
+            ghcr.io/${{ needs.prepare.outputs.repo_owner }}/ffmpeg:${{ needs.prepare.outputs.ffmpeg_version }}-${{ needs.prepare.outputs.tag_suffix }}-${{ needs.prepare.outputs.short_sha }}-${{ matrix.platform }}
             ghcr.io/${{ needs.prepare.outputs.repo_owner }}/ffmpeg:${{ needs.prepare.outputs.ffmpeg_version }}-${{ needs.prepare.outputs.tag_suffix }}-${{ matrix.platform }}
             ghcr.io/${{ needs.prepare.outputs.repo_owner }}/ffmpeg:${{ needs.prepare.outputs.ffmpeg_version }}-${{ matrix.platform }}
           cache-from: type=gha,scope=ffmpeg-${{ matrix.platform }}
@@ -131,6 +134,7 @@ jobs:
           DESCRIPTION: ${{ needs.prepare.outputs.image_description }}
           CREATED: ${{ needs.prepare.outputs.created }}
           REVISION: ${{ github.sha }}
+          SHORT_SHA: ${{ needs.prepare.outputs.short_sha }}
           SOURCE: https://github.com/${{ github.repository }}
           VENDOR: ${{ needs.prepare.outputs.repo_owner }}
           AUTHORS: ${{ github.actor }}
@@ -155,9 +159,10 @@ jobs:
           )
           # One create for every tag. Each call reads both architecture manifests.
           # The commit tag matches the git release and stays on this build.
-          short_sha="${REVISION:0:12}"
+          # Per-arch images get the same commit in their own tag at push time,
+          # so a later rebuild does not leave them untagged.
           tags=(
-            -t "ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}-${short_sha}"
+            -t "ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}-${SHORT_SHA}"
             -t "ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}"
             -t "ghcr.io/${OWNER}/ffmpeg:${VER}"
           )
@@ -201,6 +206,7 @@ jobs:
             "## Image" \
             "" \
             "- \`ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}-${SHORT_SHA}\` (this release; does not move)" \
+            "- \`ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}-${SHORT_SHA}-amd64\` and \`-arm64\` (same build, one architecture; do not move)" \
             "- \`ghcr.io/${OWNER}/ffmpeg:${VER}-${SUFFIX}\`" \
             "- \`ghcr.io/${OWNER}/ffmpeg:${VER}\`")
           if [[ "$GITHUB_REF" == "refs/heads/main" || "$GITHUB_REF" == "refs/heads/dev" ]]; then

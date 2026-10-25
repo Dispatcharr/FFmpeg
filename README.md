@@ -41,7 +41,7 @@ Workflows:
 
 Tags (after a build). These names point at that build:
 
-- `<version>-nvenc130-<commit>` (e.g. `9.0.1-nvenc130-2b081ea69803`). This tag does not move. It is the same name as the git release, without the leading `v`, so this image and that release are the same build.
+- `<version>-nvenc130-<commit>` (e.g. `9.0.1-nvenc130-2b081ea69803`). This tag does not move. It is the same name as the git release, without the leading `v`, so this image and that release are the same build. Each architecture image also gets `<version>-nvenc130-<commit>-amd64` and `<version>-nvenc130-<commit>-arm64`, which do not move. Without those, the next rebuild retags `<version>-nvenc130-amd64` / `<version>-amd64` (and the arm64 pair) and the previous arch images are left untagged.
 - `<version>-nvenc130` (e.g. `9.0.1-nvenc130`). This is the pin to use for the current build. The suffix is the NVENC API compiled into the binary (`nv-codec-headers` n13.0.19.1). API 13.0 still runs on Pascal and driver 580. A later 13.1 build of the same FFmpeg version is published as `<version>-nvenc131`, and the `nvenc130` tag stays on the 13.0 image. Rebuilding this FFmpeg version from a new commit moves this tag.
 - `<version>` (e.g. `9.0.1`). Same image, without the API in the name. This tag moves if that FFmpeg version is rebuilt.
 - `latest`, when the build workflow is run from `main` or `dev`. A build from another branch publishes the version tags and leaves `latest` where it is.
