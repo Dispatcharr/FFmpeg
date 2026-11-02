@@ -159,6 +159,23 @@ require_doc 'fdk-aac-stripped-NOTICE'
 require_doc 'versions.env'
 require_doc 'SOURCE_REVISION'
 
+# INTEL-MEDIA.txt is written before this smoke test on amd64 only.
+if [[ "$arch" == "amd64" ]]; then
+  require_doc 'INTEL-MEDIA.txt'
+  if ! grep -q '^INTEL_MEDIA_DRIVER_BUILD=free-kernel$' "${doc_dir}/INTEL-MEDIA.txt"; then
+    echo "INTEL-MEDIA.txt must record free-kernel build" >&2
+    cat "${doc_dir}/INTEL-MEDIA.txt" >&2
+    exit 1
+  fi
+  # Every Intel component we ship in binary form must ship its license notices.
+  for component in libva gmmlib media-driver libvpl vpl-gpu-rt; do
+    if ! compgen -G "${doc_dir}/intel-media-licenses/${component}/*" > /dev/null; then
+      echo "Missing license files for ${component} under ${doc_dir}/intel-media-licenses/" >&2
+      exit 1
+    fi
+  done
+fi
+
 if ! grep -q '^FFMPEG_VERSION=' "${doc_dir}/versions.env"; then
   echo "versions.env is missing FFMPEG_VERSION" >&2
   exit 1
@@ -166,6 +183,17 @@ fi
 if ! grep -q '^X264_COMMIT=' "${doc_dir}/versions.env"; then
   echo "versions.env is missing the static codec pins" >&2
   exit 1
+fi
+# Combined versions.env in the image must also carry the Intel pin file contents.
+if [[ "$arch" == "amd64" ]]; then
+  if ! grep -q '^INTEL_MEDIA_DRIVER_VERSION=' "${doc_dir}/versions.env"; then
+    echo "versions.env is missing Intel media pins from intel-media.env" >&2
+    exit 1
+  fi
+  if [[ ! -f "${doc_dir}/intel-media.env" ]]; then
+    echo "Missing intel-media.env next to versions.env" >&2
+    exit 1
+  fi
 fi
 revision="$(tr -d '[:space:]' < "${doc_dir}/SOURCE_REVISION")"
 if [[ ! "$revision" =~ ^(unknown|[0-9a-f]{40})$ ]]; then

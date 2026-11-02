@@ -9,8 +9,8 @@ Redistributable FFmpeg image used by [Dispatcharr](https://github.com/Dispatchar
 | TLS | GnuTLS (not OpenSSL) |
 | AAC | native `aac` + `libfdk_aac` from **fdk-aac-stripped** |
 | NVENC | `nv-codec-headers` **n13.0.19.1** (API 13.0; Pascal / driver 580 OK) |
-| Quick Sync | `--enable-libvpl` on amd64 (oneVPL). The arm64 image has no `qsv`: Ubuntu 26 publishes `libvpl` and the Intel media driver for amd64 only, and arm64 has no Quick Sync engine. VAAPI stays on both architectures. The old `--enable-libmfx` flag is not used. |
-| GPU userspace | amd64: Intel iHD + i965, plus AMD radeonsi/r600. arm64: AMD radeonsi/r600 only. NVIDIA's driver stays on the host. |
+| Quick Sync | `--enable-libvpl` on amd64 (oneVPL). The arm64 image has no `qsv`: Intel Quick Sync userspace is amd64-only, and arm64 has no Quick Sync engine. VAAPI stays on both architectures. The old `--enable-libmfx` flag is not used. |
+| GPU userspace | amd64: free-kernel Intel iHD + oneVPL stack pinned in `intel-media.env` (currently media-driver / vpl-gpu-rt **26.3.5**), Ubuntu i965, plus AMD radeonsi/r600. arm64: AMD radeonsi/r600 only. NVIDIA's driver stays on the host. Intel pins are a separate file so FFmpeg/codec bumps do not bust the Intel Docker/GHA cache layer. |
 | Nonfree | **not enabled** |
 | Base OS | Ubuntu 26.04 (`ubuntu:26.04` / resolute) |
 | Linkage | libav, x264, x265, libvpx, dav1d, LAME, Opus, and fdk-aac-stripped are compiled into `ffmpeg`. GnuTLS, subtitles, SRT/RIST, libaom, SVT-AV1, VAAPI, Quick Sync, and NVENC stay dynamic. |
@@ -29,8 +29,8 @@ docker run --rm ghcr.io/dispatcharr/ffmpeg:local ffmpeg -hide_banner -version
 - Base: Ubuntu 26.04
 - `/usr/local/bin/ffmpeg`, `/usr/local/bin/ffprobe` (libav and the codecs we compile are inside the binary)
 - AMD VA drivers (`radeonsi`, `r600`) on both architectures, under `/usr/lib/<triplet>/dri/`
-- Intel Quick Sync userspace (`iHD`, `i965`, `libvpl`, `libmfx-gen`) on amd64 only
-- Docs: `/usr/local/share/doc/dispatcharr-ffmpeg/` (`CONFIGURATION`, `VERSIONS`, `versions.env`, `SOURCE_REVISION`, license texts)
+- Intel Quick Sync userspace on amd64 only, built from `intel-media.env`: free-kernel `iHD`, `libva`, `libvpl` and `gmmlib` under `/usr/local/lib/<triplet>/`, and `libmfx-gen` (with its `libmfx-gen/` plugin directory) under `/usr/lib/<triplet>/`. The libvpl dispatcher only searches system library directories, so `libmfx-gen` cannot live under `/usr/local`. Ubuntu `i965` stays on apt, and with it Ubuntu's `libva2`; the loader prefers the `/usr/local` copy and `scripts/check-intel-media-runtime.sh` asserts that at build time.
+- Docs: `/usr/local/share/doc/dispatcharr-ffmpeg/` (`CONFIGURATION`, `VERSIONS`, `versions.env`, `SOURCE_REVISION`, `INTEL-MEDIA.txt` and `intel-media-licenses/` on amd64, license texts)
 
 ## CI
 
@@ -57,7 +57,7 @@ gh workflow run version-bump.yml
 
 ## Smoke checks
 
-`scripts/smoke-test.sh` asserts GPL/version3/GnuTLS/libzvbi/libfdk_aac/NVENC/VAAPI are enabled, that `nonfree` / `openssl` / `libmfx` are absent, that libav and the compiled-in codecs (x264, x265, libvpx, dav1d, LAME, Opus, fdk-aac-stripped) are not dynamically linked, that the license/docs under `/usr/local/share/doc/dispatcharr-ffmpeg/` are present, and on amd64 that Quick Sync (`libvpl`, `h264_qsv`) is present.
+`scripts/smoke-test.sh` asserts GPL/version3/GnuTLS/libzvbi/libfdk_aac/NVENC/VAAPI are enabled, that `nonfree` / `openssl` / `libmfx` are absent, that libav and the compiled-in codecs (x264, x265, libvpx, dav1d, LAME, Opus, fdk-aac-stripped) are not dynamically linked, that the license/docs under `/usr/local/share/doc/dispatcharr-ffmpeg/` are present, and on amd64 that Quick Sync (`libvpl`, `h264_qsv`), the free-kernel `INTEL-MEDIA.txt` pins and the Intel license notices are present. The runtime stage also runs `scripts/check-intel-media-runtime.sh`, which checks that the Intel libraries resolve from `/usr/local`, that nothing is unresolved, and that `libmfx-gen` is where the dispatcher can find it.
 
 ## Licensing
 

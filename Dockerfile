@@ -11,16 +11,10 @@ FROM ${UBUNTU_BASE} AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PREFIX=/usr/local
-ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig
 ARG TARGETARCH
 
-COPY versions.env /tmp/versions.env
-# shellcheck disable=SC1091
-RUN set -eux; . /tmp/versions.env; \
-    echo "FFMPEG_VERSION=$FFMPEG_VERSION" > /tmp/build-versions; \
-    echo "NV_CODEC_HEADERS_TAG=$NV_CODEC_HEADERS_TAG" >> /tmp/build-versions; \
-    echo "FDK_AAC_STRIPPED_COMMIT=$FDK_AAC_STRIPPED_COMMIT" >> /tmp/build-versions
-
+# Toolchain first. Independent of pin files so apt stays cached across bumps.
 RUN set -eux; \
     apt-get update; \
     apt-get install --no-install-recommends -y \
@@ -35,7 +29,7 @@ RUN set -eux; \
     libzvbi-dev \
     libsoxr-dev libwebp-dev libzimg-dev libbluray-dev \
     libsrt-gnutls-dev librist-dev \
-    libdrm-dev libva-dev \
+    libdrm-dev libpciaccess-dev \
     ocl-icd-opencl-dev; \
     arch="${TARGETARCH:-}"; \
     if [ -z "$arch" ]; then \
@@ -44,10 +38,53 @@ RUN set -eux; \
         aarch64|arm64) arch=arm64 ;; \
       esac; \
     fi; \
-    if [ "$arch" = "amd64" ]; then \
-      apt-get install --no-install-recommends -y libvpl-dev; \
+    # amd64 builds libva / libvpl from intel-media.env. arm64 keeps distro libva.
+    if [ "$arch" = "arm64" ]; then \
+      apt-get install --no-install-recommends -y libva-dev; \
     fi; \
     rm -rf /var/lib/apt/lists/*
+
+# --- Intel free-kernel media stack (amd64 only) ---
+# Separate pin file so bumping FFmpeg/codecs in versions.env does not bust this
+# GHA/Buildx layer. It is rebuilt only when intel-media.env, build-intel-media.sh,
+# or the toolchain apt layer above changes.
+# Ubuntu 26.04's intel-media-va-driver is still 26.1.2 and breaks Arc hevc_qsv.
+COPY intel-media.env /tmp/intel-media.env
+COPY scripts/build-intel-media.sh /tmp/build-intel-media.sh
+RUN set -eux; \
+    chmod +x /tmp/build-intel-media.sh; \
+    arch="${TARGETARCH:-}"; \
+    if [ -z "$arch" ]; then \
+      case "$(uname -m)" in \
+        x86_64) arch=amd64 ;; \
+        aarch64|arm64) arch=arm64 ;; \
+      esac; \
+    fi; \
+    if [ "$arch" = "amd64" ]; then \
+      set -a; . /tmp/intel-media.env; set +a; \
+      /tmp/build-intel-media.sh; \
+      printf '%s\n' "/usr/local/lib/x86_64-linux-gnu" \
+        > /etc/ld.so.conf.d/dispatcharr-intel-media.conf; \
+      ldconfig; \
+    else \
+      mkdir -p /opt/intel-media-runtime/usr/local/lib; \
+      touch /opt/intel-media-runtime/usr/local/lib/.keep; \
+    fi
+
+# FFmpeg / codec pins. Changes here must not rebuild the Intel layer above.
+COPY versions.env /tmp/versions.env
+# shellcheck disable=SC1091
+RUN set -eux; \
+    . /tmp/versions.env; \
+    . /tmp/intel-media.env; \
+    echo "FFMPEG_VERSION=$FFMPEG_VERSION" > /tmp/build-versions; \
+    echo "NV_CODEC_HEADERS_TAG=$NV_CODEC_HEADERS_TAG" >> /tmp/build-versions; \
+    echo "FDK_AAC_STRIPPED_COMMIT=$FDK_AAC_STRIPPED_COMMIT" >> /tmp/build-versions; \
+    echo "LIBVA_VERSION=$LIBVA_VERSION" >> /tmp/build-versions; \
+    echo "INTEL_GMMLIB_VERSION=$INTEL_GMMLIB_VERSION" >> /tmp/build-versions; \
+    echo "INTEL_MEDIA_DRIVER_VERSION=$INTEL_MEDIA_DRIVER_VERSION" >> /tmp/build-versions; \
+    echo "LIBVPL_VERSION=$LIBVPL_VERSION" >> /tmp/build-versions; \
+    echo "VPL_GPU_RT_VERSION=$VPL_GPU_RT_VERSION" >> /tmp/build-versions
 
 # --- nv-codec-headers (pinned 13.0 for Pascal / driver 580) ---
 RUN set -eux; . /tmp/versions.env; \
@@ -85,6 +122,7 @@ RUN set -eux; set -a; . /tmp/versions.env; set +a; /tmp/build-static-codecs.sh
 # --- FFmpeg ---
 # set -a exports versions.env into build.sh (CONFIGURATION records those pins).
 # TARGETARCH is set by BuildKit (amd64 / arm64). cuda-llvm and libvpl are amd64-only.
+# Intel userspace is already in PREFIX from the earlier amd64 stage.
 RUN set -eux; set -a; . /tmp/versions.env; set +a; \
     mkdir -p /tmp/ffmpeg; \
     curl -fsSL "$FFMPEG_URL" | tar -xJ --strip-components=1 -C /tmp/ffmpeg; \
@@ -99,11 +137,18 @@ RUN set -eux; set -a; . /tmp/versions.env; set +a; \
       > /usr/local/share/doc/dispatcharr-ffmpeg/FDK-AAC-STRIPPED.txt; \
     rm -rf /tmp/ffmpeg
 
-# Source offer for this binary: full pin list, plus the git commit that built it.
+# Source offer: both pin files, plus a combined versions.env for one-file sourcing.
 # Local builds that do not pass SOURCE_REVISION record "unknown".
 ARG SOURCE_REVISION=unknown
 RUN set -eux; \
-    cp /tmp/versions.env /usr/local/share/doc/dispatcharr-ffmpeg/versions.env; \
+    cp /tmp/versions.env /usr/local/share/doc/dispatcharr-ffmpeg/versions.env.ffmpeg; \
+    cp /tmp/intel-media.env /usr/local/share/doc/dispatcharr-ffmpeg/intel-media.env; \
+    { \
+      cat /tmp/versions.env; \
+      echo; \
+      echo "# --- Intel media stack (from intel-media.env) ---"; \
+      cat /tmp/intel-media.env; \
+    } > /usr/local/share/doc/dispatcharr-ffmpeg/versions.env; \
     printf '%s\n' "$SOURCE_REVISION" > /usr/local/share/doc/dispatcharr-ffmpeg/SOURCE_REVISION
 
 COPY scripts/smoke-test.sh /tmp/smoke-test.sh
@@ -119,7 +164,8 @@ ARG TARGETARCH
 
 # Package SONAMEs are for Ubuntu 26.04 (resolute). Re-check when bumping the base.
 # mesa-libgallium ships the AMD VA drivers (radeonsi, r600). Ubuntu 26 has no mesa-va-drivers package.
-# Intel Quick Sync and iHD/i965 are amd64-only in this archive. NVIDIA drivers stay on the host.
+# amd64: i965 stays on Ubuntu; iHD / libvpl / libmfx-gen come from the free-kernel
+# source build (see INTEL-MEDIA.txt). NVIDIA drivers stay on the host.
 RUN set -eux; \
     apt-get update && apt-get install --no-install-recommends -y \
     ca-certificates \
@@ -131,7 +177,7 @@ RUN set -eux; \
     libzvbi0t64 \
     libsoxr0 libwebp7 libwebpmux3 libzimg2 libbluray3 \
     libsrt1.5-gnutls librist4 \
-    libdrm2 libva2 libva-drm2 \
+    libdrm2 \
     ocl-icd-libopencl1 \
     mesa-libgallium \
     ; \
@@ -143,27 +189,27 @@ RUN set -eux; \
       esac; \
     fi; \
     if [ "$arch" = "amd64" ]; then \
-      apt-get install --no-install-recommends -y \
-        libvpl2 \
-        libmfx-gen1.2 \
-        intel-media-va-driver \
-        i965-va-driver; \
+      apt-get install --no-install-recommends -y i965-va-driver; \
+    else \
+      apt-get install --no-install-recommends -y libva2 libva-drm2; \
     fi; \
     rm -rf /var/lib/apt/lists/*; \
     if [ "$arch" = "amd64" ]; then triplet=x86_64-linux-gnu; else triplet=aarch64-linux-gnu; fi; \
     test -f "/usr/lib/${triplet}/dri/radeonsi_drv_video.so"; \
     test -f "/usr/lib/${triplet}/dri/r600_drv_video.so"; \
     if [ "$arch" = "amd64" ]; then \
-      test -f "/usr/lib/${triplet}/dri/iHD_drv_video.so"; \
       test -f "/usr/lib/${triplet}/dri/i965_drv_video.so"; \
-      test -e "/usr/lib/${triplet}/libvpl.so.2"; \
-      test -e "/usr/lib/${triplet}/libmfx-gen.so.1.2"; \
     fi
 
 # One layer for both binaries. Static archives and headers stay in the builder.
 COPY --from=builder /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/
 # Builder docs first, then write UBUNTU-PACKAGES.txt so a directory COPY cannot replace it.
 COPY --from=builder /usr/local/share/doc/dispatcharr-ffmpeg /usr/local/share/doc/dispatcharr-ffmpeg
+# Free-kernel Intel userspace (amd64), rooted at /: libva, libvpl, gmmlib and iHD
+# under /usr/local, libmfx-gen under /usr/lib (the libvpl dispatcher only searches
+# system directories). Only a placeholder on arm64.
+COPY --from=builder /opt/intel-media-runtime/ /
+COPY scripts/check-intel-media-runtime.sh /tmp/check-intel-media-runtime.sh
 
 RUN set -eu; \
     arch="${TARGETARCH:-}"; \
@@ -173,6 +219,7 @@ RUN set -eu; \
         aarch64|arm64) arch=arm64 ;; \
       esac; \
     fi; \
+    if [ "$arch" = "amd64" ]; then triplet=x86_64-linux-gnu; else triplet=aarch64-linux-gnu; fi; \
     pkgs="libgnutls30t64 libgmp10 libxml2-16 \
         libvorbis0a libvorbisenc2 \
         libaom3 libsvtav1enc2 \
@@ -180,12 +227,21 @@ RUN set -eu; \
         libzvbi0t64 \
         libsoxr0 libwebp7 libwebpmux3 libzimg2 libbluray3 \
         libsrt1.5-gnutls librist4 \
-        libdrm2 libva2 libva-drm2 \
+        libdrm2 \
         ocl-icd-libopencl1 \
         mesa-libgallium"; \
     if [ "$arch" = "amd64" ]; then \
-      pkgs="$pkgs libvpl2 libmfx-gen1.2 intel-media-va-driver i965-va-driver"; \
+      pkgs="$pkgs i965-va-driver"; \
+      test -f /usr/local/share/doc/dispatcharr-ffmpeg/INTEL-MEDIA.txt; \
+      printf '%s\n' \
+        "/usr/local/lib/${triplet}" \
+        > /etc/ld.so.conf.d/dispatcharr-intel-media.conf; \
+      ldconfig; \
+      TRIPLET="$triplet" bash /tmp/check-intel-media-runtime.sh /usr/local/bin/ffmpeg; \
+    else \
+      pkgs="$pkgs libva2 libva-drm2"; \
     fi; \
+    rm -f /tmp/check-intel-media-runtime.sh; \
     dpkg-query -W -f '${Package} ${Version}\n' $pkgs \
         > /usr/local/share/doc/dispatcharr-ffmpeg/UBUNTU-PACKAGES.txt; \
     test -f /usr/local/share/doc/dispatcharr-ffmpeg/VERSIONS; \
@@ -201,11 +257,17 @@ RUN set -eu; \
 # container starts. "video" is what bind-mounts libnvidia-encode.so.1 and
 # libnvcuvid.so.1 from the host. Without it the default is compute,utility,
 # which is enough for nvidia-smi and not enough for NVENC.
+# LIBVA_DRIVERS_PATH: our free-kernel iHD (amd64) first, then Ubuntu dri
+# (i965 / radeonsi / r600). Both triplets are listed so one ENV works on
+# amd64 and arm64; missing directories are ignored by libva.
+# LD_LIBRARY_PATH is unset on purpose: ldconfig above registers
+# /usr/local/lib/<triplet> for the Intel stack on amd64.
 ENV PATH="/usr/local/bin:${PATH}" \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     NVIDIA_DRIVER_CAPABILITIES="compute,video,utility" \
-    NVIDIA_VISIBLE_DEVICES="all"
+    NVIDIA_VISIBLE_DEVICES="all" \
+    LIBVA_DRIVERS_PATH="/usr/local/lib/x86_64-linux-gnu/dri:/usr/local/lib/aarch64-linux-gnu/dri:/usr/lib/x86_64-linux-gnu/dri:/usr/lib/aarch64-linux-gnu/dri"
 
 LABEL org.opencontainers.image.title="ffmpeg" \
       org.opencontainers.image.description="Redistributable FFmpeg image for Dispatcharr. GPL v3, GnuTLS, NVENC API 13.0, no nonfree." \
