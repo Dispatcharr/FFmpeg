@@ -247,12 +247,19 @@ RUN set -eu; \
     test -f /usr/local/share/doc/dispatcharr-ffmpeg/VERSIONS; \
     test -f /usr/local/share/doc/dispatcharr-ffmpeg/versions.env; \
     test -f /usr/local/share/doc/dispatcharr-ffmpeg/SOURCE_REVISION; \
-    printf 'LANG=C.UTF-8\nLC_ALL=C.UTF-8\n' > /etc/default/locale; \
+    printf 'LANG=C.UTF-8\nLC_ALL=C.UTF-8\n' > /etc/locale.conf; \
+    ln -sfr /etc/locale.conf /etc/default/locale; \
     ffmpeg -hide_banner -version
 
 # Keep PATH obvious for derived images (DispatcharrBase).
 # C.UTF-8: language-neutral UTF-8 for all consumers of this Ubuntu rootfs
 # (avoids plain C / SQL_ASCII defaults in Postgres and other tools).
+# Write /etc/locale.conf, not a regular /etc/default/locale file: derived
+# images that install systemd force-replace /etc/default/locale with a
+# symlink to ../locale.conf, which would drop a legacy regular file.
+# Keep the compatibility symlink for pam_env (su - reads that path).
+# ENV covers processes that inherit the container environment; locale.conf
+# covers login shells and survives later locales/systemd configures.
 # The NVIDIA container runtime reads NVIDIA_DRIVER_CAPABILITIES when the
 # container starts. "video" is what bind-mounts libnvidia-encode.so.1 and
 # libnvcuvid.so.1 from the host. Without it the default is compute,utility,
